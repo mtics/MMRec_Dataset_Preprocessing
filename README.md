@@ -15,8 +15,7 @@ Currently, we used the `open_clip` as the foundation model, and only preprocess 
 
 2. For quick start, please run:
     ``````
-    python main.py --alias FedMAE --dataset movielens --data_file ml-100k.dat \
-        --lr 1e-3 --l2_reg 1e-5 --seed 0
+    python main.py
     ``````
 
 ## Thanks
