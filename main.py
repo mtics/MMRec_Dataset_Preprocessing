@@ -50,11 +50,10 @@ def quick_start(config, dataset_name):
 
 if __name__ == '__main__':
 
+    datasets = ['Amazon_Baby', 'Bili_Food', 'Bili_Movie', 'Bili_Dance', 'KU']
+
     dataset_base = './datasets/'
     data_save_dir = './processed_datasets/'
-
-    datasets = ['Amazon_Baby', 'Bili_Food', 'Bili_Movie', 'Bili_Dance', 'KU']
-    datasets = ['Bili_Food', 'Bili_Movie', 'Bili_Dance', 'KU']
 
     # 0. Load dataset config
     args = read_yaml_to_dict(os.path.join(dataset_base, 'general.yaml'))
