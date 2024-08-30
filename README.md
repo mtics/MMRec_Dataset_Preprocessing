@@ -1,7 +1,8 @@
 # MMRec_Dataset_Preprocessing
 
 > This project is used to preprocess the multimodal recommendation datasets with foundation models.
-> Currently, we used the `open_clip` as the foundation model, and only preprocess the `title` field as the text modality.
+
+Currently, we used the `open_clip` as the foundation model, and only preprocess the `title` field as the text modality.
 
 ## Requirements
 
