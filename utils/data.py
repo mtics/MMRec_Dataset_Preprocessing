@@ -14,27 +14,21 @@ from tqdm import tqdm  # 导入 tqdm 库
 def get_illegal_ids_by_inter_num(data, field, max_num=None, min_num=None):
     """
     Get illegal ids by interaction number
-    :param data: data frame
-    :param field:
-    :param max_num:
-    :param min_num:
-    :return:
+    Optimized for efficiency and readability.
     """
 
-    if field is None:
-        return set()
-    if max_num is None and min_num is None:
+    if field is None or (max_num is None and min_num is None):
         return set()
 
     max_num = max_num or np.inf
     min_num = min_num or -1
 
-    ids = data[field].values
-    inter_num = Counter(ids)
-    ids = {id_ for id_ in inter_num if inter_num[id_] < min_num or inter_num[id_] > max_num}
-    print(f'Illegal {field} num: {len(ids)}')
+    inter_num = data[field].value_counts(sort=False)
+    illegal_ids = set(inter_num[inter_num < min_num].index.tolist() + inter_num[inter_num > max_num].index.tolist())
 
-    return ids
+    print(f'Illegal {field} num: {len(illegal_ids)}')
+    return illegal_ids
+
 
 
 def filter_by_k_core(data, learner_id, course_id, min_user_num, min_item_num):
@@ -77,9 +71,9 @@ def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_di
     if dataset == 'Baby':
         inter_data = pd.read_csv(os.path.join(dataset_dir, load_file), sep=',', header=None,
                                  names=[uid_field, iid_field, rating_field, timestamp_field])
-    elif dataset in ['Food', 'Movie', 'Dance', 'KU']:
+    elif dataset in ['Food', 'Movie', 'Dance', 'KU', 'DY']:
         inter_data = pd.read_csv(os.path.join(dataset_dir, load_file), sep=',', header=None,
-                                 names=[uid_field, iid_field, timestamp_field])
+                                 names=[iid_field, uid_field, timestamp_field])
         inter_data[rating_field] = 1.0
 
     print(f'Original data size: {inter_data.shape}')
@@ -240,14 +234,17 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
     print(f'Item title missing: {title_na_df.shape}')
 
     data['title'] = data['title'].fillna('')
-    sentences = []
-    for i, row in data.iterrows():
-        if len(row['title']) > 1:
-            sen = 'The title of this item is: {}.'.format(row['title'])
-        else:
-            sen = 'The title of this item is missing.'
+    # sentences = []
+    # for i, row in data.iterrows():
+    #     if len(row['title']) > 1:
+    #         sen = 'The title of this item is: {}.'.format(row['title'])
+    #     else:
+    #         sen = 'The title of this item is missing.'
+    #
+    #     sentences.append(sen)
 
-        sentences.append(sen)
+    sentences = [f'The title of this item is: {row["title"] if pd.notnull(row["title"]) else "missing"}.'
+                 for _, row in data.iterrows()]
 
     print(f'Item title sentences: {len(sentences)}')
 
@@ -287,7 +284,7 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
 
         if missing_iids:
             print(f'Missing image features: {len(missing_iids)}')
-            for iid in missing_iids:
+            for iid in tqdm(missing_iids, desc='Handling missing image features', unit='items'):
                 image_features[iid] = avg_img_features
 
         # 将键转换为整数，并按整数顺序排序
@@ -303,3 +300,67 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
     np.save(os.path.join(save_dir, 'text_features.npy'), text_features)
     np.save(os.path.join(save_dir, 'image_features.npy'), final_image_features)
     np.save(os.path.join(save_dir, 'similarity.npy'), similarity)
+
+    return text_features, final_image_features, similarity
+
+
+
+def gen_user_matrix(all_edge, no_users):
+    from collections import defaultdict
+
+    edge_dict = defaultdict(set)
+
+    for edge in all_edge:
+        user, item = edge
+        edge_dict[user].add(item)
+
+    min_user = 0             # 0
+    num_user = no_users      # in our case, users/items ids start from 1
+    user_graph_matrix = torch.zeros(num_user, num_user)
+    key_list = list(edge_dict.keys())
+    key_list.sort()
+    bar = tqdm(total=len(key_list))
+    for head in range(len(key_list)):
+        bar.update(1)
+        for rear in range(head+1, len(key_list)):
+            head_key = key_list[head]
+            rear_key = key_list[rear]
+            # print(head_key, rear_key)
+            item_head = edge_dict[head_key]
+            item_rear = edge_dict[rear_key]
+            # print(len(user_head.intersection(user_rear)))
+            inter_len = len(item_head.intersection(item_rear))
+            if inter_len > 0:
+                user_graph_matrix[head_key-min_user][rear_key-min_user] = inter_len
+                user_graph_matrix[rear_key-min_user][head_key-min_user] = inter_len
+    bar.close()
+
+    return user_graph_matrix
+
+def gen_user_graph(df, user_id, item_id, save_path):
+
+    num_users = len(df[user_id].unique())
+    train_df = df[df['split_label'] == 0].copy()
+    train_data = train_df[[user_id, item_id]].to_numpy()
+    user_graph_matrix = gen_user_matrix(train_data, num_users)
+    tensor_user_num = torch.zeros(num_users)
+
+    user_graph_dict, item_graph_dict = {}, {}
+
+    for i in range(num_users):
+        tensor_user_num[i] = len(torch.nonzero(user_graph_matrix[i]))
+        print(f"User {i} has {tensor_user_num[i]} neighbors.")
+
+    for i in range(num_users):
+
+        if tensor_user_num[i] <= 200:
+            user_i = torch.topk(user_graph_matrix[i], int(tensor_user_num[i]))
+        else:
+            user_i = torch.topk(user_graph_matrix[i], 200)
+
+        edge_list_i = user_i.indices.numpy().tolist()
+        edge_list_j = user_i.values.numpy().tolist()
+        edge_list = [edge_list_i, edge_list_j]
+        user_graph_dict[i] = edge_list
+
+    np.save(os.path.join(save_path, 'user_graph_dict.npy'), user_graph_dict, allow_pickle=True)

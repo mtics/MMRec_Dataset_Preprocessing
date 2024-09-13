@@ -1,7 +1,7 @@
 import os
 
 from utils.utils import read_yaml_to_dict
-from utils.data import rating2inter, loo_split, reindex_item_features, feature_extraction
+from utils.data import rating2inter, loo_split, reindex_item_features, feature_extraction, gen_user_graph
 
 
 def quick_start(config, dataset_name):
@@ -41,16 +41,27 @@ def quick_start(config, dataset_name):
     df.to_csv(inter_file, sep=',', index=False)
     print('The interaction data is saved!')
 
-    # 3. Reindex item feature ID with IDs generated before
-    item_df = reindex_item_features(dataset_path, save_path, meta_file, item_id)
+    # # 3. Reindex item feature ID with IDs generated before
+    # item_df = reindex_item_features(dataset_path, save_path, meta_file, item_id)
+    #
+    # # 4. Text & Image feature extraction
+    # feature_extraction(item_df, image_path, save_path, item_id)
 
-    # 4. Text & Image feature extraction
-    feature_extraction(item_df, image_path, save_path, item_id)
+    # 5. Generate user-user graph matrix
+    print(f'Generating u-u matrix for {dataset_name} ...\n')
+    gen_user_graph(df, user_id, item_id, save_path)
+    print('The user-user graph matrix is saved!')
+
+
+
 
 
 if __name__ == '__main__':
 
-    datasets = ['Amazon_Baby', 'Bili_Food', 'Bili_Movie', 'Bili_Dance', 'KU']
+    datasets = ['Amazon_Baby', 'Bili_Food', 'Bili_Movie', 'Bili_Dance', 'KU', 'DY']
+    # datasets = ['Bili_Food', 'Bili_Movie', 'Bili_Dance']
+    # datasets = ['KU']
+
 
     dataset_base = './datasets/'
     data_save_dir = './processed_datasets/'
@@ -60,4 +71,9 @@ if __name__ == '__main__':
 
     for dataset in datasets:
         print(f'>>>> Processing the {dataset} dataset... <<<<')
-        quick_start(args, dataset)
+
+        try:
+            quick_start(args, dataset)
+        except Exception as e:
+            print(f'Error: {e}')
+            continue
