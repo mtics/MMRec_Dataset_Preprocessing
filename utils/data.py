@@ -11,6 +11,36 @@ from utils.utils import getDF, compute_modalities_similarity
 from tqdm import tqdm  # 导入 tqdm 库
 
 
+def convert_timestamp_to_numeric(data, timestamp_field):
+    """
+    Convert timestamp field to numeric format for quantile calculation
+    """
+    if data[timestamp_field].dtype == "object":
+        # Try to convert to datetime first, then to timestamp
+        try:
+            data[timestamp_field] = pd.to_datetime(data[timestamp_field])
+            data[timestamp_field] = (
+                data[timestamp_field].astype("int64") // 10**9
+            )  # Convert to Unix timestamp
+            print(f"Converted timestamp from string to numeric (Unix timestamp)")
+        except:
+            # If datetime conversion fails, try to convert directly to numeric
+            try:
+                data[timestamp_field] = pd.to_numeric(data[timestamp_field])
+                print(f"Converted timestamp from string to numeric")
+            except:
+                print(
+                    f"Warning: Could not convert timestamp to numeric, using ordinal encoding"
+                )
+                # As a last resort, use ordinal encoding based on sorted unique values
+                unique_timestamps = sorted(data[timestamp_field].unique())
+                timestamp_mapping = {
+                    ts: idx for idx, ts in enumerate(unique_timestamps)
+                }
+                data[timestamp_field] = data[timestamp_field].map(timestamp_mapping)
+    return data
+
+
 def get_illegal_ids_by_inter_num(data, field, max_num=None, min_num=None):
     """
     Get illegal ids by interaction number
@@ -24,11 +54,13 @@ def get_illegal_ids_by_inter_num(data, field, max_num=None, min_num=None):
     min_num = min_num or -1
 
     inter_num = data[field].value_counts(sort=False)
-    illegal_ids = set(inter_num[inter_num < min_num].index.tolist() + inter_num[inter_num > max_num].index.tolist())
+    illegal_ids = set(
+        inter_num[inter_num < min_num].index.tolist()
+        + inter_num[inter_num > max_num].index.tolist()
+    )
 
-    print(f'Illegal {field} num: {len(illegal_ids)}')
+    print(f"Illegal {field} num: {len(illegal_ids)}")
     return illegal_ids
-
 
 
 def filter_by_k_core(data, learner_id, course_id, min_user_num, min_item_num):
@@ -43,8 +75,12 @@ def filter_by_k_core(data, learner_id, course_id, min_user_num, min_item_num):
     """
 
     while True:
-        ban_users = get_illegal_ids_by_inter_num(data, field=learner_id, max_num=None, min_num=min_user_num)
-        ban_items = get_illegal_ids_by_inter_num(data, field=course_id, max_num=None, min_num=min_item_num)
+        ban_users = get_illegal_ids_by_inter_num(
+            data, field=learner_id, max_num=None, min_num=min_user_num
+        )
+        ban_items = get_illegal_ids_by_inter_num(
+            data, field=course_id, max_num=None, min_num=min_item_num
+        )
         if len(ban_users) == 0 and len(ban_items) == 0:
             return
 
@@ -53,12 +89,22 @@ def filter_by_k_core(data, learner_id, course_id, min_user_num, min_item_num):
             dropped_inter |= data[learner_id].isin(ban_users)
         if course_id:
             dropped_inter |= data[course_id].isin(ban_items)
-        print(f'{len(dropped_inter)} dropped interactions')
+        print(f"{len(dropped_inter)} dropped interactions")
         data.drop(data.index[dropped_inter], inplace=True)
 
 
-def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_dir, output_dir, load_file,
-                 min_u_num=5, min_i_num=5, split_ratios=[0.8, 0.1, 0.1]):
+def rating2inter(
+    uid_field,
+    iid_field,
+    rating_field,
+    timestamp_field,
+    dataset_dir,
+    output_dir,
+    load_file,
+    min_u_num=5,
+    min_i_num=5,
+    split_ratios=[0.8, 0.1, 0.1],
+):
     """
     Convert rating data to interaction data and split it into training, validation, and test sets
     """
@@ -66,24 +112,41 @@ def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_di
     # ============== 1. Filter data by k-core ==============
 
     # 5-core filtering
-    dataset = dataset_dir.split('/')[-1]
-    print(f'Filtering data by k-core for {dataset}...')
-    if dataset == 'Baby':
-        inter_data = pd.read_csv(os.path.join(dataset_dir, load_file), sep=',', header=None,
-                                 names=[uid_field, iid_field, rating_field, timestamp_field])
-    elif dataset in ['Food', 'Movie', 'Dance', 'KU', 'DY']:
-        inter_data = pd.read_csv(os.path.join(dataset_dir, load_file), sep=',', header=None,
-                                 names=[iid_field, uid_field, timestamp_field])
+    dataset = dataset_dir.split("/")[-1]
+    print(f"Filtering data by k-core for {dataset}...")
+    if dataset == "Baby":
+        inter_data = pd.read_csv(
+            os.path.join(dataset_dir, load_file),
+            sep=",",
+            header=None,
+            names=[uid_field, iid_field, rating_field, timestamp_field],
+        )
+    elif dataset in ["Food", "Movie", "Dance", "KU", "DY"]:
+        inter_data = pd.read_csv(
+            os.path.join(dataset_dir, load_file),
+            sep=",",
+            header=None,
+            names=[iid_field, uid_field, timestamp_field],
+        )
         inter_data[rating_field] = 1.0
+    elif dataset in ["All_Beauty", "Gift_Cards", "MovieLens"]:
+        inter_data = pd.read_csv(
+            os.path.join(dataset_dir, load_file),
+            sep=",",
+            header=0,
+            names=[uid_field, iid_field, rating_field, timestamp_field],
+        )
 
-    print(f'Original data size: {inter_data.shape}')
+    print(f"Original data size: {inter_data.shape}")
 
     inter_data.dropna(subset=[uid_field, iid_field, timestamp_field], inplace=True)
-    inter_data.drop_duplicates(subset=[uid_field, iid_field, timestamp_field], inplace=True)
-    print(f'After removing missing values and duplicates: {inter_data.shape}')
+    inter_data.drop_duplicates(
+        subset=[uid_field, iid_field, timestamp_field], inplace=True
+    )
+    print(f"After removing missing values and duplicates: {inter_data.shape}")
 
     filter_by_k_core(inter_data, uid_field, iid_field, min_u_num, min_i_num)
-    print(f'k-core filtering: {inter_data.shape}')
+    print(f"k-core filtering: {inter_data.shape}")
 
     # Reindex user and item ids
     inter_data.reset_index(drop=True, inplace=True)
@@ -99,21 +162,27 @@ def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_di
     inter_data[iid_field] = inter_data[iid_field].map(i_id_mapping).astype(int)
 
     # Save user and item id mapping
-    u_id_mapping = pd.DataFrame(list(u_id_mapping.items()), columns=['user_id', uid_field])
-    i_id_mapping = pd.DataFrame(list(i_id_mapping.items()), columns=['asin', iid_field])
+    u_id_mapping = pd.DataFrame(
+        list(u_id_mapping.items()), columns=["user_id", uid_field]
+    )
+    i_id_mapping = pd.DataFrame(list(i_id_mapping.items()), columns=["asin", iid_field])
 
-    u_mapping_file = os.path.join(output_dir, 'u_id_mapping.csv')
-    i_mapping_file = os.path.join(output_dir, 'i_id_mapping.csv')
+    u_mapping_file = os.path.join(output_dir, "u_id_mapping.csv")
+    i_mapping_file = os.path.join(output_dir, "i_id_mapping.csv")
 
-    u_id_mapping.to_csv(u_mapping_file, sep=',', index=False)
-    i_id_mapping.to_csv(i_mapping_file, sep=',', index=False)
+    u_id_mapping.to_csv(u_mapping_file, sep=",", index=False)
+    i_id_mapping.to_csv(i_mapping_file, sep=",", index=False)
 
-    print('The mapped IDs are saved!')
+    print("The mapped IDs are saved!")
 
     # ============== 2. Split data ==============
 
     # Use the timestamp to split the data into training, validation, and test sets with the given ratios
-    print('Splitting data...')
+    print("Splitting data...")
+
+    # Convert timestamp to numeric format if needed
+    inter_data = convert_timestamp_to_numeric(inter_data, timestamp_field)
+
     tot_ratio = sum(split_ratios)
     # remove 0.0 in split_ratio
     split_ratios = [r for r in split_ratios if r > 0.0]
@@ -123,15 +192,19 @@ def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_di
     split_timestamps = list(np.quantile(inter_data[timestamp_field], split_ratios))
     # Get df training dataset with unique users and items
     df_train = inter_data[inter_data[timestamp_field] <= split_timestamps[0]].copy()
-    df_valid = inter_data[(inter_data[timestamp_field] >= split_timestamps[0]) & (
-            inter_data[timestamp_field] <= split_timestamps[1])].copy()
+    df_valid = inter_data[
+        (inter_data[timestamp_field] >= split_timestamps[0])
+        & (inter_data[timestamp_field] <= split_timestamps[1])
+    ].copy()
     df_test = inter_data[inter_data[timestamp_field] >= split_timestamps[1]].copy()
 
-    print(f'Train size: {df_train.shape}, Valid size: {df_valid.shape}, Test size: {df_test.shape}')
+    print(
+        f"Train size: {df_train.shape}, Valid size: {df_valid.shape}, Test size: {df_test.shape}"
+    )
 
     # Save the split data
-    split_label = 'split_label'
-    split_file = os.path.join(output_dir, 'inter.csv')
+    split_label = "split_label"
+    split_file = os.path.join(output_dir, "inter.csv")
 
     df_train[split_label] = 0
     df_valid[split_label] = 1
@@ -140,18 +213,18 @@ def rating2inter(uid_field, iid_field, rating_field, timestamp_field, dataset_di
     tmp_df = pd.concat([df_train, df_valid, df_test], axis=0)
     tmp_df = tmp_df[[uid_field, iid_field, rating_field, timestamp_field, split_label]]
 
-    tmp_df.to_csv(split_file, sep=',', index=False)
-    print('The split data is saved!')
+    tmp_df.to_csv(split_file, sep=",", index=False)
+    print("The split data is saved!")
 
     # Reload the split data for test
-    idx_df = pd.read_csv(split_file, sep=',')
-    print(f'Reload the split data: {idx_df.shape}')
+    idx_df = pd.read_csv(split_file, sep=",")
+    print(f"Reload the split data: {idx_df.shape}")
     uni_users = idx_df[uid_field].unique()
     uni_items = idx_df[iid_field].unique()
-    print(f'Unique users: {len(uni_users)}, Unique items: {len(uni_items)}')
+    print(f"Unique users: {len(uni_users)}, Unique items: {len(uni_items)}")
 
-    print(f'min/max user id: {min(uni_users)}/{max(uni_users)}')
-    print(f'min/max item id: {min(uni_items)}/{max(uni_items)}')
+    print(f"min/max user id: {min(uni_users)}/{max(uni_users)}")
+    print(f"min/max item id: {min(uni_items)}/{max(uni_items)}")
 
     return tmp_df
 
@@ -161,7 +234,7 @@ def loo_split(inter_data, uid_field, iid_field, timestamp_field):
     Leave-one-out splitting
     """
 
-    print('Splitting with the Leave-one-out strategy...')
+    print("Splitting with the Leave-one-out strategy...")
 
     # Construct user-item interaction dictionary for each user
     inter_data.sort_values(by=[uid_field, timestamp_field], inplace=True)
@@ -179,7 +252,7 @@ def loo_split(inter_data, uid_field, iid_field, timestamp_field):
 
         user_split_label.extend(split_label)
 
-    inter_data['split_label'] = user_split_label
+    inter_data["split_label"] = user_split_label
 
     return inter_data
 
@@ -188,29 +261,29 @@ def reindex_item_features(dataset_dir, save_dir, meta_file_name, iid_field):
     """
     Reindex item feature ID with IDs generated before
     """
-    iid_mapping_file = os.path.join(save_dir, 'i_id_mapping.csv')
-    iid_mapping = pd.read_csv(iid_mapping_file, sep=',')
-    print(f'Item mapping size: {iid_mapping.shape}')
+    iid_mapping_file = os.path.join(save_dir, "i_id_mapping.csv")
+    iid_mapping = pd.read_csv(iid_mapping_file, sep=",")
+    print(f"Item mapping size: {iid_mapping.shape}")
 
-    print('3.0. Extracting User-Item Interaction Data...')
+    print("3.0. Extracting User-Item Interaction Data...")
     meta_df = getDF(os.path.join(dataset_dir, meta_file_name))
-    print(f'Meta data size: {meta_df.shape}')
+    print(f"Meta data size: {meta_df.shape}")
 
     # 3.1. Remap item feature ID
-    map_dict = dict(zip(iid_mapping['asin'], iid_mapping[iid_field]))
+    map_dict = dict(zip(iid_mapping["asin"], iid_mapping[iid_field]))
 
-    meta_df[iid_field] = meta_df['asin'].map(map_dict)
+    meta_df[iid_field] = meta_df["asin"].map(map_dict)
     meta_df.dropna(subset=[iid_field], inplace=True)
     meta_df[iid_field] = meta_df[iid_field].astype(int)
     meta_df.sort_values(by=[iid_field], inplace=True)
 
     old_cols = meta_df.columns.tolist()
     new_cols = [old_cols[-1]] + old_cols[:-1]
-    print(f'New columns: {new_cols}')
+    print(f"New columns: {new_cols}")
 
     meta_df = meta_df[new_cols]
 
-    print(f'After remapping item feature ID: {meta_df.shape}')
+    print(f"After remapping item feature ID: {meta_df.shape}")
     return meta_df
 
 
@@ -227,37 +300,41 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
 
     # 4.2 Extract text and image features
     data.sort_values(by=[iid_field], inplace=True)
-    print(f'Item feature size: {data.shape}')
+    print(f"Item feature size: {data.shape}")
 
     # Sentences: 'title'
-    title_na_df = data[data['title'].isnull()]
-    print(f'Item title missing: {title_na_df.shape}')
+    title_na_df = data[data["title"].isnull()]
+    print(f"Item title missing: {title_na_df.shape}")
 
-    data['title'] = data['title'].fillna('')
-    # sentences = []
-    # for i, row in data.iterrows():
-    #     if len(row['title']) > 1:
-    #         sen = 'The title of this item is: {}.'.format(row['title'])
-    #     else:
-    #         sen = 'The title of this item is missing.'
-    #
-    #     sentences.append(sen)
+    data["title"] = data["title"].fillna("")
+    sentences = []
+    for i, row in data.iterrows():
+        if len(row["title"]) > 1:
+            sen = "The title of this item is: {}.".format(row["title"])
+        else:
+            sen = "The title of this item is missing."
 
-    sentences = [f'The title of this item is: {row["title"] if pd.notnull(row["title"]) else "missing"}.'
-                 for _, row in data.iterrows()]
+        sentences.append(sen)
 
-    print(f'Item title sentences: {len(sentences)}')
+    sentences = [
+        f'The title of this item is: {row["title"] if pd.notnull(row["title"]) else "missing"}.'
+        for _, row in data.iterrows()
+    ]
+
+    print(f"Item title sentences: {len(sentences)}")
 
     course_list = data[iid_field].tolist()
     assert course_list[-1] == len(course_list) - 1
 
     # 4.3 Encode text and image features by CLIP
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     # Specify the model and device, currently only supports open_clip
-    model, _, preprocess = open_clip.create_model_and_transforms('ViT-B-32', pretrained='openai', device=device)
+    model, _, preprocess = open_clip.create_model_and_transforms(
+        "ViT-B-32", pretrained="openai", device=device
+    )
 
     model.eval()
-    tokenizer = open_clip.get_tokenizer('ViT-B-32')
+    tokenizer = open_clip.get_tokenizer("ViT-B-32")
 
     text = tokenizer(sentences).to(device)
 
@@ -267,10 +344,10 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
         text_features /= text_features.norm(dim=-1, keepdim=True)
         text_features = text_features.cpu().numpy()
         for _, _, files in os.walk(img_dir):
-            for file in tqdm(files, desc='Extracting image features', unit='images'):
-                iid = int(file.split('.')[0])
-                if data['asin'].isin([iid]).any():
-                    idx = data.loc[data['asin'] == iid]['itemID'].iloc[0]
+            for file in tqdm(files, desc="Extracting image features", unit="images"):
+                iid = int(file.split(".")[0])
+                if data["asin"].isin([iid]).any():
+                    idx = data.loc[data["asin"] == iid]["itemID"].iloc[0]
                     # print(f'Processing image: {iid}/ {len(files)}')
                     image_path = os.path.join(img_dir, file)
                     image = preprocess(Image.open(image_path)).unsqueeze(0).to(device)
@@ -283,8 +360,10 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
         missing_iids = all_iids - set(map(int, image_features.keys()))
 
         if missing_iids:
-            print(f'Missing image features: {len(missing_iids)}')
-            for iid in tqdm(missing_iids, desc='Handling missing image features', unit='items'):
+            print(f"Missing image features: {len(missing_iids)}")
+            for iid in tqdm(
+                missing_iids, desc="Handling missing image features", unit="items"
+            ):
                 image_features[iid] = avg_img_features
 
         # 将键转换为整数，并按整数顺序排序
@@ -297,12 +376,11 @@ def feature_extraction(data, img_dir, save_dir, iid_field):
         # Compute the cosine similarity between text and image features
         similarity = compute_modalities_similarity(text_features, final_image_features)
 
-    np.save(os.path.join(save_dir, 'text_features.npy'), text_features)
-    np.save(os.path.join(save_dir, 'image_features.npy'), final_image_features)
-    np.save(os.path.join(save_dir, 'similarity.npy'), similarity)
+    np.save(os.path.join(save_dir, "text_features.npy"), text_features)
+    np.save(os.path.join(save_dir, "image_features.npy"), final_image_features)
+    np.save(os.path.join(save_dir, "similarity.npy"), similarity)
 
     return text_features, final_image_features, similarity
-
 
 
 def gen_user_matrix(all_edge, no_users):
@@ -314,15 +392,15 @@ def gen_user_matrix(all_edge, no_users):
         user, item = edge
         edge_dict[user].add(item)
 
-    min_user = 0             # 0
-    num_user = no_users      # in our case, users/items ids start from 1
+    min_user = 0  # 0
+    num_user = no_users  # in our case, users/items ids start from 1
     user_graph_matrix = torch.zeros(num_user, num_user)
     key_list = list(edge_dict.keys())
     key_list.sort()
     bar = tqdm(total=len(key_list))
     for head in range(len(key_list)):
         bar.update(1)
-        for rear in range(head+1, len(key_list)):
+        for rear in range(head + 1, len(key_list)):
             head_key = key_list[head]
             rear_key = key_list[rear]
             # print(head_key, rear_key)
@@ -331,16 +409,17 @@ def gen_user_matrix(all_edge, no_users):
             # print(len(user_head.intersection(user_rear)))
             inter_len = len(item_head.intersection(item_rear))
             if inter_len > 0:
-                user_graph_matrix[head_key-min_user][rear_key-min_user] = inter_len
-                user_graph_matrix[rear_key-min_user][head_key-min_user] = inter_len
+                user_graph_matrix[head_key - min_user][rear_key - min_user] = inter_len
+                user_graph_matrix[rear_key - min_user][head_key - min_user] = inter_len
     bar.close()
 
     return user_graph_matrix
 
+
 def gen_user_graph(df, user_id, item_id, save_path):
 
     num_users = len(df[user_id].unique())
-    train_df = df[df['split_label'] == 0].copy()
+    train_df = df[df["split_label"] == 0].copy()
     train_data = train_df[[user_id, item_id]].to_numpy()
     user_graph_matrix = gen_user_matrix(train_data, num_users)
     tensor_user_num = torch.zeros(num_users)
@@ -363,4 +442,8 @@ def gen_user_graph(df, user_id, item_id, save_path):
         edge_list = [edge_list_i, edge_list_j]
         user_graph_dict[i] = edge_list
 
-    np.save(os.path.join(save_path, 'user_graph_dict.npy'), user_graph_dict, allow_pickle=True)
+    np.save(
+        os.path.join(save_path, "user_graph_dict.npy"),
+        user_graph_dict,
+        allow_pickle=True,
+    )

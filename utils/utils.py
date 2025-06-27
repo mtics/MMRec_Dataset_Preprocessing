@@ -6,26 +6,44 @@ import yaml
 
 
 def parse(file_path):
-    g = gzip.open(file_path, 'rb')
+    g = gzip.open(file_path, "rb")
     for l in g:
         yield eval(l)
 
 
 def getDF(file_path):
-    if file_path.endswith('.gz'):
+    if file_path.endswith(".gz"):
         i = 0
         data = {}
         for d in parse(file_path):
             data[i] = d
             i += 1
-        return pd.DataFrame.from_dict(data, orient='index')
-    elif file_path.endswith('.csv'):
-        return pd.read_csv(file_path, sep=',', header=None, names=['asin', 'cn_title', 'title'])
+        return pd.DataFrame.from_dict(data, orient="index")
+    elif file_path.endswith(".csv"):
+        if (
+            "All_Beauty" in file_path
+            or "Gift_Cards" in file_path
+            or "MovieLens" in file_path
+        ):
+            return pd.read_csv(
+                file_path,
+                sep=",",
+                header=0,
+                names=["asin", "title"],
+            )
+        else:
+            return pd.read_csv(
+                file_path, sep=",", header=None, names=["asin", "cn_title", "title"]
+            )
 
 
 def is_valid_url(url):
     # 简单检查URL格式是否有效
-    if pd.isna(url) or not isinstance(url, str) or not url.startswith(('http://', 'https://')):
+    if (
+        pd.isna(url)
+        or not isinstance(url, str)
+        or not url.startswith(("http://", "https://"))
+    ):
         return False
     return True
 
@@ -38,8 +56,8 @@ def download_images(data, target_folder):
 
     # 遍历DataFrame中的每一行
     for index, row in data.iterrows():
-        iid = row['itemID']
-        image_url = row['imUrl']
+        iid = row["itemID"]
+        image_url = row["imUrl"]
 
         # 构造图片的保存路径
         file_path = os.path.join(target_folder, f"{iid}.jpg")
@@ -64,7 +82,7 @@ def download_images(data, target_folder):
             file_path = os.path.join(target_folder, f"{iid}.jpg")
 
             # 将图片写入文件
-            with open(file_path, 'wb') as file:
+            with open(file_path, "wb") as file:
                 file.write(response.content)
 
             print(f"Download image successfully: {file_path}")
@@ -82,7 +100,7 @@ def download_images(data, target_folder):
 
 def read_yaml_to_dict(file_path):
     # 打开并读取 YAML 文件
-    with open(file_path, 'r') as file:
+    with open(file_path, "r") as file:
         # 使用 yaml.safe_load() 将 YAML 内容加载为 Python 字典
         yaml_content = yaml.safe_load(file)
     return yaml_content
@@ -92,7 +110,9 @@ def compute_modalities_similarity(encoding1, encoding2):
     import numpy as np
 
     # 确保输入的两个编码具有相同的形状
-    assert encoding1.shape == encoding2.shape, f"Two modality encodings must have the same shape. But got: {encoding1.shape} and {encoding2.shape}"
+    assert (
+        encoding1.shape == encoding2.shape
+    ), f"Two modality encodings must have the same shape. But got: {encoding1.shape} and {encoding2.shape}"
 
     # L2 归一化每个模态的特征向量
     encoding1_norm = encoding1 / np.linalg.norm(encoding1, axis=1, keepdims=True)
